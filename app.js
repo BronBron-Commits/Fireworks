@@ -20,6 +20,9 @@ const state = {
   autoRate: 1.25
 };
 
+let audioCtx = null;
+let audioUnlocked = false;
+
 function rand(min, max) {
   return Math.random() * (max - min) + min;
 }
@@ -29,6 +32,94 @@ function formatNumber(n) {
   if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
   if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
   return Math.floor(n).toString();
+}
+
+function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  audioUnlocked = true;
+}
+
+function makeNoiseBuffer(seconds = 0.2) {
+  const sampleRate = audioCtx.sampleRate;
+  const length = Math.floor(sampleRate * seconds);
+  const buffer = audioCtx.createBuffer(1, length, sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) {
+    data[i] = Math.random() * 2 - 1;
+  }
+  return buffer;
+}
+
+function playLaunchSound() {
+  if (!audioUnlocked || !audioCtx) return;
+
+  const now = audioCtx.currentTime;
+
+  const osc = audioCtx.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(rand(420, 520), now);
+  osc.frequency.exponentialRampToValueAtTime(rand(680, 820), now + 0.18);
+
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.018, now + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(1200, now);
+  filter.Q.value = 1.2;
+
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(audioCtx.destination);
+
+  osc.start(now);
+  osc.stop(now + 0.22);
+}
+
+function playExplosionSound() {
+  if (!audioUnlocked || !audioCtx) return;
+
+  const now = audioCtx.currentTime;
+
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = makeNoiseBuffer(0.35);
+
+  const noiseFilter = audioCtx.createBiquadFilter();
+  noiseFilter.type = 'lowpass';
+  noiseFilter.frequency.setValueAtTime(rand(700, 1200), now);
+
+  const noiseGain = audioCtx.createGain();
+  noiseGain.gain.setValueAtTime(0.04, now);
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+
+  const tone = audioCtx.createOscillator();
+  tone.type = 'triangle';
+  tone.frequency.setValueAtTime(rand(140, 220), now);
+  tone.frequency.exponentialRampToValueAtTime(rand(60, 90), now + 0.25);
+
+  const toneGain = audioCtx.createGain();
+  toneGain.gain.setValueAtTime(0.02, now);
+  toneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+
+  noise.connect(noiseFilter);
+  noiseFilter.connect(noiseGain);
+  noiseGain.connect(audioCtx.destination);
+
+  tone.connect(toneGain);
+  toneGain.connect(audioCtx.destination);
+
+  noise.start(now);
+  noise.stop(now + 0.36);
+
+  tone.start(now);
+  tone.stop(now + 0.26);
 }
 
 function resize() {
@@ -171,12 +262,15 @@ function launch(x = rand(w * 0.15, w * 0.85)) {
     hue: rand(0, 360),
     trail: []
   });
+
+  playLaunchSound();
 }
 
 function explode(x, y, hue) {
   const count = Math.floor(rand(48, 78));
   state.money += state.sparkValue * rand(4, 7);
   updateUI();
+  playExplosionSound();
 
   for (let i = 0; i < count; i++) {
     const angle = rand(0, Math.PI * 2);
@@ -262,6 +356,7 @@ function loop(now) {
 }
 
 window.addEventListener('pointerdown', (e) => {
+  ensureAudio();
   launch(e.clientX);
 }, { passive: true });
 
